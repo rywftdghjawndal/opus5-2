@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Three Places — how a Caesar cipher breaks</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&family=JetBrains+Mono:wght@400;700&display=block" rel="stylesheet">
+<style>
+  :root{
+    --paper:#EFEAE0;
+    --ink:#17150F;
+    --red:#C8321E;
+  }
+  html,body{margin:0;height:100%;background:var(--paper);overflow:hidden}
+  body{font-family:'Archivo',system-ui,sans-serif;color:var(--ink)}
+  #stage{
+    position:absolute;left:50%;top:50%;width:1920px;height:1080px;
+    transform-origin:0 0;opacity:0;
+  }
+  .mono{font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+
+  /* ruler */
+  #ruler{position:absolute;left:440px;top:150px;width:1040px;height:68px}
+  #ruler .row{position:absolute;left:0;height:30px;width:1040px;overflow:hidden}
+  #ruler .row.plain{top:0}
+  #ruler .row.shifted{top:38px}
+  #ruler .strip{position:absolute;top:0;left:-1040px;width:3120px;height:30px;display:flex;will-change:transform}
+  #ruler .strip span{display:block;width:40px;text-align:center;font-size:24px;line-height:30px}
+  #ruler .row.plain .strip span{opacity:.62}
+  #ruler .row.shifted .strip span{color:var(--red);font-weight:700}
+  #ruler .tag{position:absolute;right:calc(100% + 26px);font-size:15px;letter-spacing:.02em;opacity:.5;line-height:30px;white-space:nowrap;text-align:right}
+  #ruler .tag.a{top:0}
+  #ruler .tag.b{top:38px;color:var(--red);opacity:.85}
+
+  /* message cells */
+  #msg{position:absolute;left:0;top:0}
+  .cell{
+    position:absolute;width:27.6px;height:54px;overflow:hidden;
+    transform-origin:0 0;will-change:transform;
+    font-size:46px;line-height:54px;
+  }
+  .cell .strip{will-change:transform}
+  .cell .strip span{display:block;height:54px;text-align:center}
+
+  /* histogram svg */
+  #hist{position:absolute;left:0;top:0;width:1920px;height:1080px;overflow:visible;pointer-events:none}
+  #hist .base{stroke:var(--ink);stroke-width:2;opacity:.85;transform-origin:206px 854px}
+  #hist .ghost{fill:none;stroke:var(--red);stroke-width:3;stroke-linejoin:miter}
+  #hist .ghostfill{fill:var(--red);opacity:0}
+  #hist text{font-family:'JetBrains Mono',monospace;font-size:22px;text-anchor:middle}
+  #hist .col{fill:var(--ink);opacity:.5}
+  #hist .dec{fill:var(--red);font-weight:700}
+  #ghostTag{position:absolute;left:0;top:0;color:var(--red);font-size:17px;font-weight:600;letter-spacing:.01em;white-space:nowrap}
+
+  /* labels */
+  .label{position:absolute;left:96px;top:66px;display:flex;align-items:baseline;gap:18px;white-space:nowrap;
+    clip-path:inset(0 100% 0 0)}
+  .label .n{font-size:22px;font-weight:600;opacity:.55;font-variant-numeric:tabular-nums}
+  .label .w{font-size:44px;font-weight:800;letter-spacing:-.025em;font-variation-settings:'wdth' 100}
+
+  /* captions */
+  .cap{position:absolute;left:0;right:0;top:952px;text-align:center;font-size:29px;font-weight:400;
+    letter-spacing:-.005em;opacity:0;line-height:1.3}
+  .cap em{font-style:normal;color:var(--red);font-weight:600}
+
+  /* readout */
+  #readout{position:absolute;right:96px;top:56px;text-align:right;opacity:0}
+  #readout .k{font-size:22px;font-weight:600;opacity:.55}
+  #keynum{font-size:132px;font-weight:900;line-height:.92;letter-spacing:-.04em;
+    font-variation-settings:'wdth' 100;margin-top:6px}
+  #fit{font-size:22px;margin-top:10px;opacity:.7}
+  #fit b{font-weight:700}
+
+  #under{position:absolute;height:4px;background:var(--red);transform-origin:0 50%;transform:scaleX(0)}
+
+  #footer{position:absolute;left:0;right:0;top:1006px;text-align:center;font-size:18px;letter-spacing:.01em;opacity:0}
+  #footer .mono{opacity:.75}
+
+  #replay{
+    position:absolute;right:88px;top:960px;width:60px;height:60px;border-radius:50%;
+    border:2px solid var(--ink);background:transparent;cursor:pointer;opacity:0;
+    display:flex;align-items:center;justify-content:center;padding:0;pointer-events:none;
+    transition:background .2s,color .2s
+  }
+  #replay svg{width:26px;height:26px;stroke:var(--ink);fill:none;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;transition:stroke .2s}
+  #replay:hover{background:var(--ink)}
+  #replay:hover svg{stroke:var(--paper)}
+
+  #grain{position:fixed;inset:0;pointer-events:none;opacity:.34;mix-blend-mode:multiply;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='300' height='300'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .55 0 0 0 0 .53 0 0 0 0 .5 0 0 0 .5 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+    background-size:300px 300px}
+  #vignette{position:fixed;inset:0;pointer-events:none;
+    background:radial-gradient(ellipse at center,rgba(0,0,0,0) 55%,rgba(40,30,10,.10) 100%)}
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="ruler">
+    <div class="tag a">plain</div>
+    <div class="tag b">cipher</div>
+    <div class="row plain"><div class="strip mono" id="rulerPlain"></div></div>
+    <div class="row shifted"><div class="strip mono" id="rulerShift"></div></div>
+  </div>
+
+  <div id="msg" class="mono"></div>
+  <div id="under"></div>
+
+  <svg id="hist" viewBox="0 0 1920 1080">
+    <defs><clipPath id="histClip"><rect id="clipRect" x="0" y="0" width="0" height="0"/></clipPath></defs>
+    <line id="baseLine" class="base"/>
+    <g clip-path="url(#histClip)">
+      <g id="ghostG">
+        <path id="ghostFill" class="ghostfill"/>
+        <path id="ghostWrap" class="ghost"/>
+      </g>
+      <path id="ghostDraw" class="ghost"/>
+    </g>
+    <g id="colLabels"></g>
+    <g id="decLabels"></g>
+  </svg>
+  <div id="ghostTag">English, expected</div>
+
+  <div class="label" id="l1"><span class="n">01</span><span class="w">Substitute</span></div>
+  <div class="label" id="l2"><span class="n">02</span><span class="w">Count</span></div>
+  <div class="label" id="l3"><span class="n">03</span><span class="w">Slide</span></div>
+  <div class="label" id="l4"><span class="n">04</span><span class="w">Read</span></div>
+
+  <div class="cap" id="c1">Rome, 1st century BC. Caesar's cipher: move every letter <em>three places</em> down the alphabet.</div>
+  <div class="cap" id="c2">Unreadable. It stayed that way for nine hundred years.</div>
+  <div class="cap" id="c3">Baghdad, 9th century. Al-Kindi stops reading the letters and starts counting them.</div>
+  <div class="cap" id="c4">Every language has a shape. Substitution moves it — it doesn't erase it.</div>
+  <div class="cap" id="c5">Key 3. The peaks line up: <em>H</em> is E, <em>W</em> is T, <em>D</em> is A.</div>
+  <div class="cap" id="c6">Suetonius, describing Caesar's cipher. <span style="opacity:.6">Lives of the Caesars, c. AD 121.</span></div>
+
+  <div id="readout">
+    <div class="k">key</div>
+    <div id="keynum">0</div>
+    <div id="fit" class="mono">fit <b id="fitv">.034</b></div>
+  </div>
+
+  <div id="footer"><span class="mono">26 keys &nbsp;·&nbsp; 122 letters &nbsp;·&nbsp; one count</span></div>
+
+  <button id="replay" aria-label="Replay">
+    <svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v5h-5"/></svg>
+  </button>
+</div>
+<div id="grain"></div>
+<div id="vignette"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.13.0/dist/gsap.min.js"></script>
+<script>
+(function(){
+  const W=1920,H=1080;
+  const A='ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const SHIFT=3;
+  const TEXT='If anyone wishes to decipher these, and get at their meaning, he must substitute the fourth letter of the alphabet, namely D, for A, and so with the others.';
+  // English letter frequencies, percent, A..Z
+  const ENG=[8.2,1.5,2.8,4.3,12.7,2.2,2.0,6.1,7.0,.15,.77,4.0,2.4,6.7,7.5,1.9,.095,6.0,6.3,9.1,2.8,.98,2.4,.15,2.0,.074];
+  const FITS=['.034','.027','.039','.071'];
+
+  // message grid
+  const FS=46, CW=27.6, CH=54, LP=72, MAXC=48;
+  // histogram
+  const PITCH=58, HX0=(W-26*PITCH)/2, BASE=850, RP=36, SC=0.66;
+
+  const stage=document.getElementById('stage');
+  function fit(){
+    const s=Math.min(innerWidth/W,innerHeight/H);
+    stage.style.transform=`translate(-50%,-50%) scale(${s})`;
+    stage.style.transformOrigin='50% 50%';
+  }
+  addEventListener('resize',fit);fit();
+
+  // ---------- ruler ----------
+  const rp=document.getElementById('rulerPlain'), rs=document.getElementById('rulerShift');
+  rp.innerHTML=(A+A+A).split('').map(c=>`<span>${c}</span>`).join('');
+  rs.innerHTML=(A+A+A).split('').map(c=>`<span>${c}</span>`).join('');
+  const rulerPlainSpans=[...rp.children].slice(26,52), rulerShiftSpans=[...rs.children].slice(26,52);
+
+  // ---------- message cells ----------
+  const lines=[];{let cur='';for(const w of TEXT.split(' ')){const t=cur?cur+' '+w:w;if(t.length>MAXC){lines.push(cur);cur=w}else cur=t}lines.push(cur)}
+  const longest=Math.max(...lines.map(l=>l.length));
+  const MX=(W-longest*CW)/2, MY=(H-lines.length*LP)/2+6;
+  const msg=document.getElementById('msg');
+  const cells=[], letters=[], punct=[];
+  let wordIdx=0;
+  lines.forEach((line,li)=>{
+    for(let ci=0;ci<line.length;ci++){
+      const ch=line[ci];
+      if(ch===' '){wordIdx++;continue}
+      const up=ch.toUpperCase(), isL=A.includes(up);
+      const el=document.createElement('div');el.className='cell';
+      el.style.left=(MX+ci*CW)+'px';el.style.top=(MY+li*LP)+'px';
+      const strip=document.createElement('div');strip.className='strip';
+      const seq=isL?[ch,...[1,2,3].map(k=>A[(A.indexOf(up)+k)%26])]:[ch];
+      strip.innerHTML=seq.map(c=>`<span>${c}</span>`).join('');
+      el.appendChild(strip);msg.appendChild(el);
+      const rec={el,strip,ch,isL,word:wordIdx,line:li,col:ci,cipher:isL?seq[3]:null};
+      cells.push(rec);(isL?letters:punct).push(rec);
+    }
+    wordIdx++;
+  });
+
+  // bin assignment (reading order)
+  const counts=new Array(26).fill(0);
+  letters.forEach(r=>{const c=A.indexOf(r.cipher);r.bin=c;r.row=counts[c]++;});
+  const tileW=CW*SC;
+  letters.forEach(r=>{
+    const tx=HX0+r.bin*PITCH+(PITCH-tileW)/2, ty=BASE-(r.row+1)*RP;
+    r.fx=tx-parseFloat(r.el.style.left); r.fy=ty-parseFloat(r.el.style.top);
+  });
+
+  // underline "namely D, for A"
+  {
+    const li=lines.findIndex(l=>l.includes('namely D, for A'));
+    const ci=lines[li].indexOf('namely D, for A');
+    const u=document.getElementById('under');
+    u.style.left=(MX+ci*CW)+'px';u.style.width=(15*CW)+'px';u.style.top=(MY+li*LP+CH+2)+'px';
+  }
+
+  // ---------- histogram svg ----------
+  const svgNS='http://www.w3.org/2000/svg';
+  const clip=document.getElementById('clipRect');
+  clip.setAttribute('x',HX0-2);clip.setAttribute('width',26*PITCH+4);clip.setAttribute('y',0);clip.setAttribute('height',BASE+2);
+  const baseLine=document.getElementById('baseLine');
+  baseLine.setAttribute('x1',HX0);baseLine.setAttribute('x2',HX0+26*PITCH);baseLine.setAttribute('y1',BASE+4);baseLine.setAttribute('y2',BASE+4);
+  const N=122;
+  const expected=ENG.map(p=>p/100*N);
+  function stepPath(c0,c1,close){
+    let d=`M${HX0+c0*PITCH} ${BASE}`;
+    for(let c=c0;c<c1;c++){const i=((c%26)+26)%26;const y=BASE-expected[i]*RP;d+=` L${HX0+c*PITCH} ${y} L${HX0+(c+1)*PITCH} ${y}`}
+    d+=` L${HX0+c1*PITCH} ${BASE}`;
+    return close?d+' Z':d;
+  }
+  const ghostDraw=document.getElementById('ghostDraw'), ghostWrap=document.getElementById('ghostWrap'), ghostFill=document.getElementById('ghostFill');
+  ghostDraw.setAttribute('d',stepPath(0,26,false));
+  ghostWrap.setAttribute('d',stepPath(-26,26,false));
+  ghostFill.setAttribute('d',stepPath(-26,26,true));
+  const ghostLen=ghostDraw.getTotalLength();
+  ghostDraw.style.strokeDasharray=ghostLen;ghostDraw.style.strokeDashoffset=ghostLen;
+
+  const colG=document.getElementById('colLabels'), decG=document.getElementById('decLabels');
+  const colLabels=[],decLabels=[];
+  for(let c=0;c<26;c++){
+    const t=document.createElementNS(svgNS,'text');t.setAttribute('class','col');
+    t.setAttribute('x',HX0+c*PITCH+PITCH/2);t.setAttribute('y',BASE+32);t.textContent=A[c];colG.appendChild(t);colLabels.push(t);
+    const d=document.createElementNS(svgNS,'text');d.setAttribute('class','dec');
+    d.setAttribute('x',HX0+c*PITCH+PITCH/2);d.setAttribute('y',BASE+64);d.textContent=A[(c-SHIFT+26)%26];decG.appendChild(d);decLabels.push(d);
+  }
+  const ghostTag=document.getElementById('ghostTag');
+  // tag sits centered above the E peak (column 4 at shift 0)
+  ghostTag.style.left=(HX0+4.5*PITCH)+'px';
+  ghostTag.style.top=(BASE-expected[4]*RP-38)+'px';
+  gsap.set(ghostTag,{xPercent:-50});
+
+  // ---------- elements ----------
+  const $=id=>document.getElementById(id);
+  const readout=$('readout'), keynum=$('keynum'), fitv=$('fitv'), footer=$('footer'), replay=$('replay'), under=$('under'), ruler=$('ruler');
+  const labels=[1,2,3,4].map(i=>$('l'+i)), caps=[1,2,3,4,5,6].map(i=>$('c'+i));
+
+  // ---------- timeline ----------
+  const tl=gsap.timeline({paused:true});
+  const cellEls=cells.map(r=>r.el), letterEls=letters.map(r=>r.el), letterStrips=letters.map(r=>r.strip), punctEls=punct.map(r=>r.el);
+
+  function label(i,tIn,tOut){
+    const el=labels[i];
+    tl.fromTo(el,{clipPath:'inset(0 100% 0 0)',opacity:1},{clipPath:'inset(0 0% 0 0)',duration:.7,ease:'power4.inOut'},tIn);
+    if(tOut!=null) tl.to(el,{opacity:0,duration:.3,ease:'power2.in'},tOut);
+  }
+  function cap(i,tIn,tOut){
+    const el=caps[i];
+    tl.fromTo(el,{opacity:0,y:14},{opacity:1,y:0,duration:.8,ease:'power3.out'},tIn);
+    if(tOut!=null) tl.to(el,{opacity:0,duration:.35,ease:'power2.in'},tOut);
+  }
+
+  // initial states
+  tl.set([ruler],{opacity:1},0);
+  tl.set(rulerPlainSpans.concat(rulerShiftSpans),{opacity:0},0);
+  tl.set(rs,{x:0},0);
+  tl.set(cellEls,{opacity:0,x:0,y:0,scale:1},0);
+  tl.set(letterStrips,{y:0},0);
+  tl.set(baseLine,{scaleX:0},0);
+  tl.set(colLabels,{opacity:0},0);
+  tl.set(decLabels,{opacity:0,y:-10},0);
+  tl.set([ghostDraw,ghostWrap],{opacity:0},0);
+  tl.set(ghostDraw,{strokeDashoffset:ghostLen},0);
+  tl.set(ghostFill,{opacity:0},0);
+  tl.set($('ghostG'),{x:0},0);
+  tl.set(ghostTag,{opacity:0},0);
+  tl.set(readout,{opacity:0},0);
+  tl.set(keynum,{color:'#17150F',fontVariationSettings:"'wdth' 100"},0);
+  tl.set(footer,{opacity:0},0);
+  tl.set(replay,{opacity:0,pointerEvents:'none'},0);
+  tl.set(under,{scaleX:0},0);
+  tl.set(labels,{opacity:1,clipPath:'inset(0 100% 0 0)'},0);
+  tl.set(caps,{opacity:0},0);
+  tl.set(['#ruler .tag'],{opacity:0},0);
+  tl.set(rs,{color:'#C8321E'},0);
+  tl.set(keynum,{textContent:'0'},0);
+  tl.set(fitv,{textContent:FITS[0]},0);
+
+  // ===== MOVE 1 — SUBSTITUTE (0 – 8.6) =====
+  tl.to(rulerPlainSpans,{opacity:.62,duration:.5,stagger:.018,ease:'power2.out'},0.25);
+  tl.to(rulerShiftSpans,{opacity:1,duration:.5,stagger:.018,ease:'power2.out'},0.55);
+  tl.to('#ruler .tag.a',{opacity:.5,duration:.5},0.7);
+  tl.to('#ruler .tag.b',{opacity:.85,duration:.5},0.95);
+  tl.fromTo(cellEls,{opacity:0,y:16},{opacity:1,y:0,duration:.6,ease:'power3.out',
+    stagger:(i,t)=>cells[i].word*0.048},1.0);
+  label(0,1.0,8.7);
+  cap(0,1.6,5.7);
+
+  // anticipation, then the slide: three places
+  tl.to(rs,{x:14,duration:.28,ease:'power2.inOut'},3.75);
+  tl.to(rs,{x:-3*40,duration:.75,ease:'back.out(1.5)'},4.03);
+  // per-letter strips scroll three places, left→right wave
+  tl.to(letterStrips,{y:-3*CH,duration:.55,ease:'power2.inOut',stagger:.012},4.45);
+  cap(1,6.5,8.7);
+
+  // ===== MOVE 2 — COUNT (8.9 – 15.2) =====
+  tl.to(ruler,{opacity:0,duration:.4,ease:'power2.in'},8.75);
+  label(1,8.9,15.1);
+  tl.to(punctEls,{opacity:0,duration:.35,ease:'power2.in'},8.95);
+  tl.to(baseLine,{scaleX:1,duration:.9,ease:'power4.inOut'},9.0);
+  tl.to(letterEls,{x:(i)=>letters[i].fx,y:(i)=>letters[i].fy,scale:SC,duration:.95,ease:'power3.inOut',stagger:.0125},9.15);
+  tl.to(colLabels,{opacity:.5,duration:.4,stagger:.012},9.6);
+  cap(2,9.6,12.5);
+  // the shape of English draws on
+  tl.to(ghostDraw,{opacity:1,duration:.01},12.4);
+  tl.to(ghostDraw,{strokeDashoffset:0,duration:1.4,ease:'power2.inOut'},12.4);
+  tl.fromTo(ghostTag,{opacity:0,x:-8},{opacity:1,x:0,duration:.5,ease:'power3.out'},13.4);
+  cap(3,12.9,15.1);
+
+  // ===== MOVE 3 — SLIDE (15.3 – 20.4) =====
+  label(2,15.3,20.3);
+  tl.set(ghostWrap,{opacity:1},15.3);
+  tl.set(ghostDraw,{opacity:0},15.3);
+  tl.fromTo(readout,{opacity:0,y:10},{opacity:1,y:0,duration:.6,ease:'power3.out'},15.3);
+  tl.to(ghostTag,{opacity:0,duration:.3},15.6);
+  const g=$('ghostG');
+  function keyStep(k,t,dur,ease){
+    tl.to(g,{x:k*PITCH,duration:dur,ease},t);
+    tl.set(keynum,{textContent:String(k)},t+dur*0.45);
+    tl.set(fitv,{textContent:FITS[k]},t+dur*0.45);
+    tl.fromTo(keynum,{fontVariationSettings:"'wdth' 62"},{fontVariationSettings:"'wdth' 100",duration:.45,ease:'back.out(2)'},t+dur*0.45);
+  }
+  keyStep(1,16.1,.42,'power3.inOut');
+  keyStep(2,16.75,.42,'power3.inOut');
+  // the lock: heavier, with overshoot
+  tl.to(g,{x:3*PITCH,duration:.7,ease:'back.out(2.2)'},17.45);
+  tl.set(keynum,{textContent:'3'},17.72);
+  tl.set(fitv,{textContent:FITS[3]},17.72);
+  tl.fromTo(keynum,{fontVariationSettings:"'wdth' 62"},{fontVariationSettings:"'wdth' 125",duration:.35,ease:'power4.out'},17.72);
+  tl.to(keynum,{fontVariationSettings:"'wdth' 100",duration:.5,ease:'power2.inOut'},18.07);
+  tl.to(keynum,{color:'#C8321E',duration:.3},17.8);
+  tl.fromTo(ghostFill,{opacity:0},{opacity:.22,duration:.12,ease:'power1.out'},17.85);
+  tl.to(ghostFill,{opacity:.09,duration:.6,ease:'power2.out'},17.97);
+  tl.to(decLabels,{opacity:1,y:0,duration:.45,ease:'back.out(2)',stagger:.016},17.95);
+  cap(4,18.45,20.3);
+
+  // ===== MOVE 4 — READ (20.5 – 26) =====
+  label(3,20.5,null);
+  tl.to([ghostWrap,ghostFill,readout],{opacity:0,duration:.4,ease:'power2.in'},20.3);
+  tl.to(decLabels.concat(colLabels),{opacity:0,duration:.35,ease:'power2.in',stagger:.006},20.35);
+  tl.to(baseLine,{scaleX:0,duration:.6,ease:'power4.inOut',transformOrigin:'100% 50%'},20.7);
+  tl.to(letterEls,{x:0,y:0,scale:1,duration:.95,ease:'power3.inOut',stagger:.008},20.6);
+  // land as ciphertext, breathe, then decrypt left→right: the payoff
+  tl.to(letterStrips,{y:0,duration:.5,ease:'power2.inOut',stagger:.014},22.75);
+  tl.to(punctEls,{opacity:1,duration:.6,ease:'power2.out'},22.75);
+  cap(5,24.9,null);
+  tl.to(under,{scaleX:1,duration:.7,ease:'power4.inOut'},25.35);
+  tl.fromTo(footer,{opacity:0,y:8},{opacity:1,y:0,duration:.7,ease:'power3.out'},26.1);
+  tl.to(replay,{opacity:1,duration:.5,ease:'power2.out'},26.5);
+  tl.set(replay,{pointerEvents:'auto'},26.5);
+  tl.addPause(27.2);
+
+  replay.addEventListener('click',()=>{tl.restart();});
+
+  // start once fonts are in so nothing pops unstyled
+  const fonts=[
+    document.fonts.load('46px "JetBrains Mono"'),
+    document.fonts.load('700 46px "JetBrains Mono"'),
+    document.fonts.load('800 44px "Archivo"'),
+    document.fonts.load('400 29px "Archivo"'),
+    document.fonts.load('900 132px "Archivo"')
+  ];
+  const start=()=>{ if(start.done) return; start.done=true; gsap.to(stage,{opacity:1,duration:.4}); tl.play(0); };
+  Promise.all(fonts).then(()=>document.fonts.ready).then(start).catch(start);
+  setTimeout(start,3500);
+
+  window.__tl=tl;
+})();
+</script>
+</body>
+</html>
