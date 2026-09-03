@@ -7,7 +7,7 @@
 	"scripts": {
 		"setup": {
 			"enabled": true,
-			"command": null
+			"command": "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git-lfs || true"
 		},
 		"run": {
 			"enabled": true,
