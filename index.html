@@ -692,6 +692,7 @@ function render(){
   }
   if(SEEK!==null){tcEl.textContent='t='+tl.time().toFixed(2)+'  d='+Math.round(d);}
 }
+gsap.ticker.lagSmoothing(false); /* wall-clock truth: throttled rendering must not compress pacing, and the WebAudio bed runs on wall clock */
 gsap.ticker.add(render);
 
 /* ============ 7. boot ============ */
